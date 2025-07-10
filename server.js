@@ -18,9 +18,9 @@ const app = express();
 const port = process.env.PORT || 50000;
 
 app.use(cors({
-    origin: `http://localhost:${port}`, // Allow requests from your frontend
+    origin: 'http://localhost:8080', // Allow requests from your local http-server
     credentials: true,
-    exposedHeaders: ['Cart-Token', 'woocommerce-session'] // Expose custom headers for cart token
+    exposedHeaders: ['Cart-Token', 'woocommerce-session']
 }));
 app.use(express.json()); // For parsing application/json
 
