@@ -18,8 +18,11 @@ const app = express();
 const port = process.env.PORT || 50000;
 
 app.use(cors({
-    origin: '*', // TEMPORARY: Allows all origins for testing CORS. NOT FOR PRODUCTION!
-    credentials: true, // Keep this as true for session/cart token
+    origin: [
+        'http://localhost:8080', // Keep this for local testing if you need it
+        'https://five4autoworks-frontend.onrender.com' // THIS IS THE CORRECT FRONTEND URL
+    ],
+    credentials: true,
     exposedHeaders: ['Cart-Token', 'woocommerce-session']
 }));
 app.use(express.json()); // For parsing application/json
