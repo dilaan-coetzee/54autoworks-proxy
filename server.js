@@ -18,7 +18,10 @@ const app = express();
 const port = process.env.PORT || 50000;
 
 app.use(cors({
-    origin: 'http://localhost:8080', // Allow requests from your local http-server
+    origin: [
+        'http://localhost:8080', // For local development with http-server
+        'https://54autoworks-proxy.onrender.com' // For when your frontend is also deployed on Render
+    ],
     credentials: true,
     exposedHeaders: ['Cart-Token', 'woocommerce-session']
 }));
