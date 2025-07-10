@@ -18,11 +18,8 @@ const app = express();
 const port = process.env.PORT || 50000;
 
 app.use(cors({
-    origin: [
-        'http://localhost:8080', // For local development with http-server
-        'https://54autoworks-proxy.onrender.com' // For when your frontend is also deployed on Render
-    ],
-    credentials: true,
+    origin: '*', // TEMPORARY: Allows all origins for testing CORS. NOT FOR PRODUCTION!
+    credentials: true, // Keep this as true for session/cart token
     exposedHeaders: ['Cart-Token', 'woocommerce-session']
 }));
 app.use(express.json()); // For parsing application/json
