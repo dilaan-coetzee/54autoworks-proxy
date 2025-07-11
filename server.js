@@ -17,11 +17,29 @@ console.log('------------------------------------------------');
 const app = express();
 const port = process.env.PORT || 50000;
 
-app.use(cors({
-    origin: 'https://five4autoworks-frontend.onrender.com', // EXACT URL of your frontend
-    credentials: true, // Keep this as true for session/cart token
-    exposedHeaders: ['Cart-Token', 'woocommerce-session']
-}));
+// Manually set CORS headers (more aggressive for debugging)
+app.use((req, res, next) => {
+    const allowedOrigin = 'https://five4autoworks-frontend.onrender.com'; // Your exact frontend URL
+
+    // Set Access-Control-Allow-Origin
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+
+    // Set Access-Control-Allow-Methods for preflight and actual requests
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+
+    // Set Access-Control-Allow-Headers to allow common headers and custom ones
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cart-Token, woocommerce-session');
+
+    // Allow credentials (cookies, HTTP authentication, client certificates)
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200); // Respond to preflight immediately
+    }
+
+    next(); // Continue to the next middleware/route
+});
 app.use(express.json()); // For parsing application/json
 
 const WOO_API_URL = process.env.WOO_API_URL; // e.g., 'https://yourwordpresssite.com/wp-json/wc/store/v1'
