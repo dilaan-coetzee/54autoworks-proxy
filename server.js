@@ -1,51 +1,50 @@
 const express = require('express');
-const cors = require('cors');
+const fetch = require('node-fetch'); // Still needed for WooCommerce API calls
 const dotenv = require('dotenv');
-const fetch = require('node-fetch'); // Make sure you have this installed: npm install node-fetch@2
 
 // Load environment variables from .env file
 dotenv.config();
 
-// --- .env Variable Check (server.js startup) ---
-console.log('--- .env Variable Check (server.js startup) ---');
-console.log('process.env.WOO_API_URL:', process.env.WOO_API_URL);
-console.log('process.env.WOO_CONSUMER_KEY:', process.env.WOO_CONSUMER_KEY ? 'Loaded' : 'UNDEFINED');
-console.log('process.env.WOO_CONSUMER_SECRET:', process.env.WOO_CONSUMER_SECRET ? 'Loaded' : 'UNDEFINED');
-console.log('process.env.EXCHANGE_RATE_API_KEY:', process.env.EXCHANGE_RATE_API_KEY ? 'Loaded' : 'UNDEFINED');
-console.log('------------------------------------------------');
-
 const app = express();
-const port = process.env.PORT || 50000;
 
-// Manually set CORS headers (more aggressive for debugging)
+// --- ULTIMATE CORS SETUP ---
+// This middleware will run for every incoming request
 app.use((req, res, next) => {
-    const allowedOrigin = 'https://five4autoworks-frontend.onrender.com'; // Your exact frontend URL
+    // Get the actual origin from the request headers
+    const origin = req.headers.origin;
 
-    // Set Access-Control-Allow-Origin
-    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    // Define the ONLY allowed frontend origin
+    const allowedFrontendOrigin = 'https://five4autoworks-frontend.onrender.com'; 
 
-    // Set Access-Control-Allow-Methods for preflight and actual requests
+    // If the request origin matches our allowed frontend, set the header explicitly
+    if (origin === allowedFrontendOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true'); // Required for session/cookies
+    } else {
+        // For any other unexpected origin, you might choose to block or log
+        // For now, we'll just not set the ACAO header, which will cause a CORS error for disallowed origins.
+        // console.warn(`[CORS] Request from disallowed origin: ${origin}`);
+    }
+
+    // Always allow these methods and headers for preflight and actual requests
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cart-Token, woocommerce-session'); // Expose custom headers
 
-    // Set Access-Control-Allow-Headers to allow common headers and custom ones
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cart-Token, woocommerce-session');
-
-    // Allow credentials (cookies, HTTP authentication, client certificates)
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-
-    // Handle preflight requests
+    // Handle preflight requests (OPTIONS method)
     if (req.method === 'OPTIONS') {
-        return res.sendStatus(200); // Respond to preflight immediately
+        // For OPTIONS requests, immediately send 200 OK with the headers set above
+        return res.sendStatus(200);
     }
 
     next(); // Continue to the next middleware/route
 });
+
 app.use(express.json()); // For parsing application/json
 
-const WOO_API_URL = process.env.WOO_API_URL; // e.g., 'https://yourwordpresssite.com/wp-json/wc/store/v1'
+const WOO_API_URL = process.env.WOO_API_URL; 
 const WOO_CONSUMER_KEY = process.env.WOO_CONSUMER_KEY;
 const WOO_CONSUMER_SECRET = process.env.WOO_CONSUMER_SECRET;
-const EXCHANGE_RATE_API_KEY = process.env.EXCHANGE_RATE_API_KEY; // This will now be your ExchangeRate-API key
+const EXCHANGE_RATE_API_KEY = process.env.EXCHANGE_RATE_API_KEY; 
 
 // Store the nonce globally on the server-side
 let wooApiNonce = null;
@@ -58,53 +57,14 @@ if (WOO_CONSUMER_KEY && WOO_CONSUMER_SECRET) {
     console.error('[FATAL] WooCommerce Consumer Key or Secret is missing in .env. API calls requiring Basic Auth will fail. Cart calls *should* still work if WOO_API_URL is correct for Store API.');
 }
 
-// --- Exchange Rate API Caching ---
-let cachedExchangeRates = null;
-let lastFetchTime = 0;
-const CACHE_DURATION = 3600 * 1000; // Cache for 1 hour (in milliseconds)
+// --- Exchange Rate Logic (Still uses hardcoded defaults for now) ---
+let cachedExchangeRates = { USD: 1, ZAR: 19.00 }; // Always use default rates
+let lastFetchTime = Date.now(); // Set initial fetch time to avoid immediate re-fetch logic
 
 async function fetchExchangeRates() {
-    if (Date.now() - lastFetchTime < CACHE_DURATION && cachedExchangeRates) {
-        console.log('[PROXY] Using cached exchange rates.');
-        return cachedExchangeRates;
-    }
-
-    if (!EXCHANGE_RATE_API_KEY) {
-        console.error('[PROXY] EXCHANGE_RATE_API_KEY is not defined in .env! Cannot fetch dynamic rates.');
-        return { USD: 1, ZAR: 19.00 }; // Fallback to hardcoded rates
-    }
-
-    // --- NEW ExchangeRate-API URL and logic ---
-    // We'll fetch base USD and then get ZAR relative to USD
-    const BASE_CURRENCY = 'USD'; // ExchangeRate-API typically works with a base currency
-    const API_URL = `https://v6.exchangerate-api.com/v6/${EXCHANGE_RATE_API_KEY}/latest/${BASE_CURRENCY}`;
-    console.log(`[PROXY] ExchangeRate-API URL being called: ${API_URL}`);
-
-    try {
-        console.log(`[PROXY] Fetching exchange rates from ExchangeRate-API: ${API_URL}`);
-        const response = await fetch(API_URL);
-        const data = await response.json();
-
-        if (response.ok && data.result === 'success' && data.conversion_rates) {
-            console.log('[PROXY] Successfully fetched exchange rates from ExchangeRate-API.');
-            cachedExchangeRates = {
-                USD: data.conversion_rates.USD, // Should be 1 if base is USD
-                ZAR: data.conversion_rates.ZAR
-            };
-            lastFetchTime = Date.now();
-            return cachedExchangeRates;
-        } else {
-            console.error('[PROXY] Failed to fetch exchange rates from ExchangeRate-API:', data.result || data.error_type || 'Unknown error');
-            return { USD: 1, ZAR: 19.00 }; // Fallback
-        }
-    } catch (error) {
-        console.error('[PROXY] Error fetching exchange rates from ExchangeRate-API:', error);
-        return { USD: 1, ZAR: 19.00 }; // Fallback
-    }
+    console.log('[PROXY] Exchange rates are hardcoded. No external API call made.');
+    return cachedExchangeRates;
 }
-
-// Serve static files from the directory where server.js is located
-app.use(express.static(__dirname));
 
 // Define a unique User-Agent string for your proxy
 const USER_AGENT_STRING = '54Autoworks-NodeJS-Proxy/1.0';
@@ -122,7 +82,6 @@ app.get('/api/init', async (req, res) => {
 
     const clientCartToken = req.headers['cart-token'];
     if (clientCartToken) {
-        // CRITICAL CHANGE: Send as 'Cart-Token' to WooCommerce for GET /cart (init)
         headers['Cart-Token'] = clientCartToken; 
         console.log('[PROXY] /init: Forwarding existing Cart-Token from client:', clientCartToken);
     } else {
@@ -137,7 +96,6 @@ app.get('/api/init', async (req, res) => {
             headers: headers
         });
 
-        // WooCommerce returns the session token in 'woocommerce-session' header
         const newWooSessionToken = response.headers.get('woocommerce-session');
         if (newWooSessionToken) {
             res.setHeader('Cart-Token', newWooSessionToken); // Set custom header for frontend
@@ -146,8 +104,7 @@ app.get('/api/init', async (req, res) => {
             console.warn('[PROXY] /init: No new woocommerce-session header received in cart response.');
         }
 
-        // IMPORTANT: Capture the Nonce from the response headers if available
-        const nonceFromHeader = response.headers.get('nonce'); // Or 'X-WP-Nonce' depending on WC version/config
+        const nonceFromHeader = response.headers.get('nonce'); 
         if (nonceFromHeader) {
             wooApiNonce = nonceFromHeader;
             console.log('[PROXY] /init: Captured Nonce from response header:', wooApiNonce);
@@ -215,9 +172,8 @@ app.post('/api/cart/add', async (req, res) => {
         console.log('[PROXY] Add: No existing cart token provided by client, starting new session.');
     }
 
-    // IMPORTANT: Add the Nonce header if we have it
     if (wooApiNonce) {
-        headers['Nonce'] = wooApiNonce; // Or 'X-WP-Nonce' depending on what WC expects
+        headers['Nonce'] = wooApiNonce; 
         console.log('[PROXY] Add: Sending Nonce header to WooCommerce:', wooApiNonce);
     } else {
         console.warn('[PROXY] Add: No Nonce available to send for add to cart.');
@@ -237,7 +193,6 @@ app.post('/api/cart/add', async (req, res) => {
             })
         });
 
-        // WooCommerce returns the session token in 'woocommerce-session' header
         const newWooSessionToken = response.headers.get('woocommerce-session');
         if (newWooSessionToken) {
             res.setHeader('Cart-Token', newWooSessionToken); // Set custom header for frontend
@@ -275,9 +230,8 @@ app.post('/api/cart/update-item', async (req, res) => {
         console.log('[PROXY] Update: Sending Cart-Token header to WooCommerce:', clientCartToken);
     }
 
-    // IMPORTANT: Add the Nonce header if we have it
     if (wooApiNonce) {
-        headers['Nonce'] = wooApiNonce; // Or 'X-WP-Nonce' depending on what WC expects
+        headers['Nonce'] = wooApiNonce; 
         console.log('[PROXY] Update: Sending Nonce header to WooCommerce:', wooApiNonce);
     } else {
         console.warn('[PROXY] Update: No Nonce available to send for update cart.');
@@ -297,7 +251,6 @@ app.post('/api/cart/update-item', async (req, res) => {
             })
         });
 
-        // WooCommerce returns the session token in 'woocommerce-session' header
         const newWooSessionToken = response.headers.get('woocommerce-session');
         if (newWooSessionToken) {
             res.setHeader('Cart-Token', newWooSessionToken);
@@ -333,9 +286,8 @@ app.post('/api/cart/remove-item', async (req, res) => {
         console.log('[PROXY] Remove: Sending Cart-Token header to WooCommerce:', clientCartToken);
     }
 
-    // IMPORTANT: Add the Nonce header if we have it
     if (wooApiNonce) {
-        headers['Nonce'] = wooApiNonce; // Or 'X-WP-Nonce' depending on what WC expects
+        headers['Nonce'] = wooApiNonce; 
         console.log('[PROXY] Remove: Sending Nonce header to WooCommerce:', wooApiNonce);
     } else {
         console.warn('[PROXY] Remove: No Nonce available to send for remove cart.');
@@ -354,7 +306,6 @@ app.post('/api/cart/remove-item', async (req, res) => {
             })
         });
 
-        // WooCommerce returns the session token in 'woocommerce-session' header
         const newWooSessionToken = response.headers.get('woocommerce-session');
         if (newWooSessionToken) {
             res.setHeader('Cart-Token', newWooSessionToken);
@@ -380,26 +331,14 @@ app.post('/api/cart/remove-item', async (req, res) => {
             console.log('removeItem: Successful (204 No Content).');
         }
 
-        // Update cart token from response body if available
-        if (data.cartToken && data.cartToken !== wooCartToken) {
-            wooCartToken = data.cartToken;
-            localStorage.setItem('wooCartToken', wooCartToken);
-            console.log('removeItem: Updated Cart Token from remove item response body:', wooCartToken);
-        } else {
-            console.warn("removeItem: No new Cart-Token received in remove item response body or headers.");
-        }
-
-        console.log('removeItem: Calling fetchAndDisplayCart after successful removal.');
-        await fetchAndDisplayCart();
-        console.log('removeItem: fetchAndDisplayCart called after successful item removal.');
-
+        res.status(response.status).json(data); // Send back response from WooCommerce
     } catch (error) {
         console.error('removeItem: Catch block - Remove item error:', error);
-        showCartError(`Failed to remove item: ${error.message}`);
-        await fetchAndDisplayCart();
+        res.status(500).json({ error: 'Failed to remove item.', details: error.message });
     }
-    console.log(`removeItem finished for item ${itemKey}`);
+    console.log(`removeItem finished for item ${key}`); 
 });
+
 
 // Get Cart (for /api/init and also for cart.html directly)
 app.get('/api/cart', async (req, res) => {
@@ -412,7 +351,6 @@ app.get('/api/cart', async (req, res) => {
 
     const clientCartToken = req.headers['cart-token'];
     if (clientCartToken) {
-        // CRITICAL CHANGE: Send as 'Cart-Token' to WooCommerce for GET /cart
         headers['Cart-Token'] = clientCartToken; 
         console.log('[PROXY] /cart (GET): Forwarding existing Cart-Token from client:', clientCartToken);
     } else {
@@ -427,7 +365,6 @@ app.get('/api/cart', async (req, res) => {
             headers: headers
         });
 
-        // WooCommerce returns the session token in 'woocommerce-session' header
         const newWooSessionToken = response.headers.get('woocommerce-session');
         if (newWooSessionToken) {
             res.setHeader('Cart-Token', newWooSessionToken);
@@ -446,10 +383,5 @@ app.get('/api/cart', async (req, res) => {
     }
 });
 
-
-// Start the server
-app.listen(port, () => {
-    console.log(`Proxy server listening at http://localhost:${port}`);
-    console.log('WooCommerce API URL (from server startup):', WOO_API_URL); // CRITICAL: This will show what's loaded
-    fetchExchangeRates().then(rates => console.log('[PROXY] Initial exchange rates fetched on startup:', rates));
-});
+// Vercel requires exporting the app for serverless functions
+module.exports = app;
