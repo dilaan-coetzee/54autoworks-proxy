@@ -1,13 +1,14 @@
 const express = require('express');
-const fetch = require('node-fetch'); // Still needed for WooCommerce API calls
+const fetch = require('node-fetch'); // Keep this for now, will update version in package.json
 const dotenv = require('dotenv');
+const cors = require('cors'); // Keep the cors package, but we'll use manual headers primarily
 
 // Load environment variables from .env file
 dotenv.config();
 
 const app = express();
 
-// --- ULTIMATE CORS SETUP ---
+// --- ULTIMATE CORS SETUP (Most Robust for Credentials) ---
 // This middleware will run for every incoming request
 app.use((req, res, next) => {
     // Get the actual origin from the request headers
@@ -16,22 +17,29 @@ app.use((req, res, next) => {
     // Define the ONLY allowed frontend origin
     const allowedFrontendOrigin = 'https://five4autoworks-frontend.onrender.com'; 
 
+    // Log the incoming origin for debugging
+    console.log(`[CORS DEBUG] Incoming Origin: ${origin}`);
+    console.log(`[CORS DEBUG] Allowed Origin: ${allowedFrontendOrigin}`);
+
     // If the request origin matches our allowed frontend, set the header explicitly
     if (origin === allowedFrontendOrigin) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true'); // Required for session/cookies
+        console.log(`[CORS DEBUG] Setting Access-Control-Allow-Origin to: ${origin}`);
     } else {
-        // For any other unexpected origin, you might choose to block or log
-        // For now, we'll just not set the ACAO header, which will cause a CORS error for disallowed origins.
-        // console.warn(`[CORS] Request from disallowed origin: ${origin}`);
+        // For any other unexpected origin, do NOT set Access-Control-Allow-Origin
+        // This will cause the browser to block the request, as intended for disallowed origins.
+        console.warn(`[CORS DEBUG] Request from disallowed origin: ${origin}. Not setting Access-Control-Allow-Origin.`);
     }
 
     // Always allow these methods and headers for preflight and actual requests
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cart-Token, woocommerce-session'); // Expose custom headers
+    console.log(`[CORS DEBUG] Setting Access-Control-Allow-Methods and Headers.`);
 
     // Handle preflight requests (OPTIONS method)
     if (req.method === 'OPTIONS') {
+        console.log(`[CORS DEBUG] Handling OPTIONS preflight request from: ${origin}`);
         // For OPTIONS requests, immediately send 200 OK with the headers set above
         return res.sendStatus(200);
     }
@@ -59,7 +67,6 @@ if (WOO_CONSUMER_KEY && WOO_CONSUMER_SECRET) {
 
 // --- Exchange Rate Logic (Still uses hardcoded defaults for now) ---
 let cachedExchangeRates = { USD: 1, ZAR: 19.00 }; // Always use default rates
-let lastFetchTime = Date.now(); // Set initial fetch time to avoid immediate re-fetch logic
 
 async function fetchExchangeRates() {
     console.log('[PROXY] Exchange rates are hardcoded. No external API call made.');
